@@ -1,0 +1,57 @@
+# Compila Wallflow como app universal (Apple Silicon + Intel) y crea un release en borrador.
+# Se dispara al subir un tag v* (ver "Publicar un release" en DEVELOPMENT.md).
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  macos:
+    # Al lanzarlo a mano hay que elegir un tag como ref, no una rama.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Wallflow __VERSION__"
+          releaseBody: "Descarga `Wallflow.dmg` y sigue las instrucciones de instalación del README."
+          releaseDraft: true
+          prerelease: false
+          args: --target universal-apple-darwin --bundles app,dmg
+
+      # Copia con nombre fijo: el README enlaza a releases/latest/download/Wallflow.dmg.
+      - name: Subir Wallflow.dmg
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp src-tauri/target/universal-apple-darwin/release/bundle/dmg/Wallflow_*_universal.dmg Wallflow.dmg
+          gh release upload "$GITHUB_REF_NAME" Wallflow.dmg --clobber
